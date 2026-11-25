@@ -82,8 +82,11 @@ int RunGpuGraph(const char *directory) {
     auto load = SuiteClock::now();
     ncnn::Net net;
     net.opt.use_vulkan_compute = true;
-    const bool memenc = base.find("memenc_") != std::string::npos;
-    net.opt.use_packing_layout = memenc;
+    // Keep pack1 + no packing_layout for all graphs, including memenc_*.
+    // The previous memenc-only packing=true + DepthWise pack4 bypass matched the
+    // crash workaround but diverged from PC prepare (packing=false) and produced
+    // near-total maskmem_features errors while maskmem_pos_enc stayed exact.
+    net.opt.use_packing_layout = false;
     net.opt.use_fp16_packed = net.opt.use_fp16_storage =
         net.opt.use_fp16_arithmetic = net.opt.use_fp16_uniform = false;
     net.opt.blob_vkallocator = &alloc;
@@ -197,13 +200,6 @@ int RunGpuGraph(const char *directory) {
           ins.push_back(blobs[b]);
         }
         int rc;
-        ncnn::VkMat depthwisePacked;
-        if (memenc && l->type == "ConvolutionDepthWise" && ins.size() == 1 &&
-            ins[0].elempack == 1) {
-          dev->convert_packing(ins[0], depthwisePacked, 4, 1, cmd, net.opt);
-          ins[0] = depthwisePacked;
-          printf("GRAPH_DEPTHWISE_INPUT_PACK4 layer=%s\n", l->name.c_str());
-        }
         if (l->type == "Slice" && l->name.rfind("unbind_", 0) == 0) {
           printf("GRAPH_CUSTOM_SPLIT %s\n", l->name.c_str());
           rc = rope.split(ins[0], outs, cmd, net.opt);
